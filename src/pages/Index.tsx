@@ -10,6 +10,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { Loader2 } from "lucide-react";
@@ -34,11 +42,20 @@ interface ExcelRow {
   "匹配方式（0-精准匹配，1-短语匹配）": number;
 }
 
+interface ErrorInfo {
+  advertiser_id: number;
+  unit_id: number;
+  message: string;
+}
+
 const IndexPage = () => {
   const [processedData, setProcessedData] = useState<ProcessedData[] | null>(
     null,
   );
   const [isProcessing, setIsProcessing] = useState(false);
+  const [accessToken, setAccessToken] = useState("");
+  const [errorList, setErrorList] = useState<ErrorInfo[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleDownloadTemplate = () => {
     const headers = [
@@ -136,6 +153,7 @@ const IndexPage = () => {
 
     setIsProcessing(true);
     setProcessedData(null);
+    setErrorList([]);
     const loadingToast = toast.loading("正在处理文件...");
 
     const reader = new FileReader();
@@ -165,6 +183,57 @@ const IndexPage = () => {
       setIsProcessing(false);
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const handleSubmit = async () => {
+    if (!processedData || !accessToken) {
+      toast.error("请先处理文件并输入Access Token。");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorList([]);
+    const loadingToast = toast.loading("正在提交数据...");
+
+    const requests = processedData.map(item =>
+      fetch("https://adapi.xiaohongshu.com/api/open/jg/negative/keyword/batch/add", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "access-token": accessToken,
+        },
+        body: JSON.stringify(item),
+      }).then(async response => {
+        const responseData = await response.json().catch(() => null);
+        if (!response.ok || (responseData && responseData.code !== 0)) {
+          return {
+            status: "failed",
+            advertiser_id: item.advertiser_id,
+            unit_id: item.unit_id,
+            message: responseData?.message || "请求失败，无法解析错误信息。",
+          };
+        }
+        return { status: "success" };
+      }).catch(error => ({
+        status: "failed",
+        advertiser_id: item.advertiser_id,
+        unit_id: item.unit_id,
+        message: error.message || "网络请求失败",
+      }))
+    );
+
+    const results = await Promise.all(requests);
+    const newErrorList = results.filter(r => r.status === 'failed') as ErrorInfo[];
+
+    setErrorList(newErrorList);
+    setIsSubmitting(false);
+    toast.dismiss(loadingToast);
+
+    if (newErrorList.length > 0) {
+      toast.error(`有 ${newErrorList.length} 个请求失败，请查看失败列表。`);
+    } else {
+      toast.success("所有数据已成功提交！");
+    }
   };
 
   return (
@@ -217,26 +286,78 @@ const IndexPage = () => {
         {processedData && (
           <Card className="mt-8">
             <CardHeader>
-              <CardTitle>处理结果</CardTitle>
+              <CardTitle>第三步：提交数据</CardTitle>
               <CardDescription>
-                这是从您的Excel文件中解析和处理后的数据。您可以复制这些数据或进行后续操作。
+                输入Access Token，预览处理结果，然后点击按钮开始批量提交。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="access-token">Access Token</Label>
+                <Input
+                  id="access-token"
+                  type="text"
+                  placeholder="在此输入你的Access Token"
+                  value={accessToken}
+                  onChange={(e) => setAccessToken(e.target.value)}
+                />
+              </div>
+              <div className="p-4 border bg-secondary rounded-md">
+                <h4 className="font-semibold mb-2">处理结果预览</h4>
+                <ScrollArea className="h-72 w-full">
+                  <pre className="text-sm">{JSON.stringify(processedData, null, 2)}</pre>
+                </ScrollArea>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      JSON.stringify(processedData, null, 2),
+                    );
+                    toast.success("结果已复制到剪贴板！");
+                  }}
+                >
+                  复制结果
+                </Button>
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || !accessToken}
+                >
+                  {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  开始批量加否
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {errorList.length > 0 && (
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle className="text-destructive">失败列表</CardTitle>
+              <CardDescription>
+                以下是提交失败的请求及其错误信息。
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ScrollArea className="h-72 w-full rounded-md border bg-secondary p-4">
-                <pre className="text-sm">{JSON.stringify(processedData, null, 2)}</pre>
-              </ScrollArea>
-              <Button
-                className="mt-4"
-                onClick={() => {
-                  navigator.clipboard.writeText(
-                    JSON.stringify(processedData, null, 2),
-                  );
-                  toast.success("结果已复制到剪贴板！");
-                }}
-              >
-                复制结果
-              </Button>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>广告主ID</TableHead>
+                    <TableHead>单元ID</TableHead>
+                    <TableHead>失败信息</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {errorList.map((error, index) => (
+                    <TableRow key={index}>
+                      <TableCell>{error.advertiser_id}</TableCell>
+                      <TableCell>{error.unit_id}</TableCell>
+                      <TableCell>{error.message}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         )}
