@@ -53,7 +53,6 @@ const IndexPage = () => {
     null,
   );
   const [isProcessing, setIsProcessing] = useState(false);
-  const [accessToken, setAccessToken] = useState("");
   const [errorList, setErrorList] = useState<ErrorInfo[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -186,8 +185,8 @@ const IndexPage = () => {
   };
 
   const handleSubmit = async () => {
-    if (!processedData || !accessToken) {
-      toast.error("请先处理文件并输入Access Token。");
+    if (!processedData) {
+      toast.error("请先处理文件。");
       return;
     }
 
@@ -200,7 +199,6 @@ const IndexPage = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "access-token": accessToken,
         },
         body: JSON.stringify(item),
       }).then(async response => {
@@ -288,20 +286,10 @@ const IndexPage = () => {
             <CardHeader>
               <CardTitle>第三步：提交数据</CardTitle>
               <CardDescription>
-                输入Access Token，预览处理结果，然后点击按钮开始批量提交。
+                预览处理结果，然后点击按钮开始批量提交。
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="access-token">Access Token</Label>
-                <Input
-                  id="access-token"
-                  type="text"
-                  placeholder="在此输入你的Access Token"
-                  value={accessToken}
-                  onChange={(e) => setAccessToken(e.target.value)}
-                />
-              </div>
               <div className="p-4 border bg-secondary rounded-md">
                 <h4 className="font-semibold mb-2">处理结果预览</h4>
                 <ScrollArea className="h-72 w-full">
@@ -321,7 +309,7 @@ const IndexPage = () => {
                 </Button>
                 <Button
                   onClick={handleSubmit}
-                  disabled={isSubmitting || !accessToken}
+                  disabled={isSubmitting}
                 >
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   开始批量加否
