@@ -1,19 +1,248 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import React, { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "sonner";
+import * as XLSX from "xlsx";
+import { Loader2 } from "lucide-react";
 
-import { MadeWithDyad } from "@/components/made-with-dyad";
+// 定义处理后数据的结构
+interface Keyword {
+  keyword: string;
+  phrase_match_type: number;
+}
 
-const Index = () => {
+interface ProcessedData {
+  advertiser_id: number;
+  unit_id: number;
+  keywords: Keyword[];
+}
+
+// 定义Excel行的数据结构
+interface ExcelRow {
+  "广告主id（短id）": number;
+  "单元id": number;
+  "否定词（1个词1行）": string;
+  "匹配方式（0-精准匹配，1-短语匹配）": number;
+}
+
+const IndexPage = () => {
+  const [processedData, setProcessedData] = useState<ProcessedData[] | null>(
+    null,
+  );
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleDownloadTemplate = () => {
+    const headers = [
+      "广告主id（短id）",
+      "单元id",
+      "否定词（1个词1行）",
+      "匹配方式（0-精准匹配，1-短语匹配）",
+    ];
+    const exampleData = [
+      {
+        "广告主id（短id）": 123456789,
+        "单元id": 987654321,
+        "否定词（1个词1行）": "免费",
+        "匹配方式（0-精准匹配，1-短语匹配）": 1,
+      },
+      {
+        "广告主id（短id）": 123456789,
+        "单元id": 987654321,
+        "否定词（1个词1行）": "教程",
+        "匹配方式（0-精准匹配，1-短语匹配）": 0,
+      },
+      {
+        "广告主id（短id）": 111222333,
+        "单元id": 444555666,
+        "否定词（1个词1行）": "破解",
+        "匹配方式（0-精准匹配，1-短语匹配）": 1,
+      },
+    ];
+    const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers, skipHeader: false });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "批量加否模板");
+    XLSX.writeFile(wb, "批量加否模板.xlsx");
+    toast.success("模板文件已开始下载！");
+  };
+
+  const processExcelData = (data: ExcelRow[]): ProcessedData[] => {
+    const groups = new Map<
+      string,
+      {
+        advertiser_id: number;
+        unit_id: number;
+        keywords: Map<string, Keyword>;
+      }
+    >();
+
+    for (const row of data) {
+      const advertiserId = row["广告主id（短id）"];
+      const unitId = row["单元id"];
+      const keywordText = row["否定词（1个词1行）"];
+      const matchType = row["匹配方式（0-精准匹配，1-短语匹配）"];
+
+      if (
+        advertiserId === undefined ||
+        unitId === undefined ||
+        keywordText === undefined ||
+        matchType === undefined
+      ) {
+        console.warn("跳过包含缺失数据的行:", row);
+        continue;
+      }
+
+      const key = `${advertiserId}-${unitId}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          advertiser_id: Number(advertiserId),
+          unit_id: Number(unitId),
+          keywords: new Map<string, Keyword>(),
+        });
+      }
+
+      const group = groups.get(key)!;
+      if (!group.keywords.has(String(keywordText))) {
+        group.keywords.set(String(keywordText), {
+          keyword: String(keywordText),
+          phrase_match_type: Number(matchType),
+        });
+      }
+    }
+
+    const result: ProcessedData[] = [];
+    for (const group of groups.values()) {
+      result.push({
+        advertiser_id: group.advertiser_id,
+        unit_id: group.unit_id,
+        keywords: Array.from(group.keywords.values()),
+      });
+    }
+
+    return result;
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessing(true);
+    setProcessedData(null);
+    const loadingToast = toast.loading("正在处理文件...");
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json: ExcelRow[] = XLSX.utils.sheet_to_json(worksheet);
+
+        const result = processExcelData(json);
+        setProcessedData(result);
+        toast.success("文件处理成功！", { id: loadingToast });
+      } catch (error) {
+        console.error("处理文件时出错:", error);
+        toast.error("文件处理失败，请检查文件格式是否正确。", {
+          id: loadingToast,
+        });
+      } finally {
+        setIsProcessing(false);
+        event.target.value = "";
+      }
+    };
+    reader.onerror = () => {
+      toast.error("读取文件失败。", { id: loadingToast });
+      setIsProcessing(false);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Welcome to Your Blank App</h1>
-        <p className="text-xl text-gray-600">
-          Start building your amazing project here!
-        </p>
+    <div className="container mx-auto p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-3xl font-bold mb-6 text-center">
+          小红书批量加否词工具
+        </h1>
+
+        <div className="grid md:grid-cols-2 gap-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>第一步：下载模板</CardTitle>
+              <CardDescription>
+                下载Excel模板文件，并根据格式要求填写内容。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={handleDownloadTemplate}>下载模板文件</Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>第二步：上传文件</CardTitle>
+              <CardDescription>上传填写好的Excel文件进行处理。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid w-full max-w-sm items-center gap-1.5">
+                <Label htmlFor="excel-file">上传Excel文件</Label>
+                <Input
+                  id="excel-file"
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handleFileChange}
+                  disabled={isProcessing}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {isProcessing && (
+          <div className="flex items-center justify-center mt-8">
+            <Loader2 className="mr-2 h-8 w-8 animate-spin" />
+            <span className="text-lg">正在处理中...</span>
+          </div>
+        )}
+
+        {processedData && (
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle>处理结果</CardTitle>
+              <CardDescription>
+                这是从您的Excel文件中解析和处理后的数据。您可以复制这些数据或进行后续操作。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-72 w-full rounded-md border bg-secondary p-4">
+                <pre className="text-sm">{JSON.stringify(processedData, null, 2)}</pre>
+              </ScrollArea>
+              <Button
+                className="mt-4"
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    JSON.stringify(processedData, null, 2),
+                  );
+                  toast.success("结果已复制到剪贴板！");
+                }}
+              >
+                复制结果
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
-      <MadeWithDyad />
     </div>
   );
 };
 
-export default Index;
+export default IndexPage;
